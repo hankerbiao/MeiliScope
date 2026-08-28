@@ -45,7 +45,12 @@ function App() {
   const [settingsLoading, setSettingsLoading] = useState(false)
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState('')
+  const [filterField, setFilterField] = useState('')
+  const [filterOperator, setFilterOperator] = useState('=')
+  const [filterValue, setFilterValue] = useState('')
   const [sort, setSort] = useState('')
+  const [sortField, setSortField] = useState('')
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
   const [facets, setFacets] = useState('')
   const [facetFilters, setFacetFilters] = useState('')
   const [retrieve, setRetrieve] = useState('')
@@ -105,6 +110,23 @@ function App() {
   const disconnect = () => { setConnected(false); setIndexes([]); setSelectedUid(''); setResponse(null); setDiagnostics(null); setSelectedHit(null) }
   const changeIndex = async (uid: string) => { setSelectedUid(uid); setResponse(null); setDiagnostics(null); await loadSettings(uid) }
 
+  const addFilterCondition = () => {
+    const field = filterField.trim()
+    const value = filterValue.trim()
+    if (!field || !value) return
+    const safeValue = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+    const literal = /^(true|false|null|-?\d+(\.\d+)?)$/i.test(value) ? value : `"${safeValue}"`
+    const condition = `${field} ${filterOperator} ${literal}`
+    setFilter((current) => current ? `${current} AND ${condition}` : condition)
+    setFilterField(''); setFilterValue('')
+  }
+  const addSortRule = () => {
+    if (!sortField) return
+    const rule = `${sortField}:${sortDirection}`
+    setSort((current) => current ? `${current},${rule}` : rule)
+    setSortField('')
+  }
+
   const buildSearchParams = (pageNumber = page): SearchParams => {
     const params: SearchParams = { q: query, offset: (pageNumber - 1) * limit, limit, matchingStrategy }
     const listFields: Array<[keyof SearchParams, string]> = [['facets', facets], ['sort', sort], ['attributesToRetrieve', retrieve], ['attributesToCrop', crop]]
@@ -137,7 +159,7 @@ function App() {
     } finally { setSearching(false) }
   }
 
-  const resetSearch = () => { setQuery(''); setFilter(''); setSort(''); setFacets(''); setFacetFilters(''); setRetrieve(''); setHighlight(''); setCrop(''); setReturnHighlight(false); setPage(1); setResponse(null); setDiagnostics(null); setSearchError('') }
+  const resetSearch = () => { setQuery(''); setFilter(''); setFilterField(''); setFilterValue(''); setSort(''); setSortField(''); setSortDirection('asc'); setFacets(''); setFacetFilters(''); setRetrieve(''); setHighlight(''); setCrop(''); setReturnHighlight(false); setPage(1); setResponse(null); setDiagnostics(null); setSearchError('') }
   const copy = async (value: string) => { try { await navigator.clipboard.writeText(value) } catch { /* clipboard permission is optional */ } }
 
   if (!connected) return <ConnectionScreen config={config} setConfig={setConfig} connecting={connecting} error={connectionError} connect={connect} />
@@ -167,8 +189,8 @@ function App() {
             <section className="panel query-panel">
               <div className="panel-heading"><div><span className="section-kicker"><SlidersHorizontal size={14} />FILTERS</span><h2>筛选与参数</h2></div><button className="text-button" onClick={resetSearch}>重置</button></div>
               <div className="field-grid two"><Field label="每页数量"><input type="number" min={1} max={1000} value={limit} onChange={(event) => { setLimit(Math.max(1, Number(event.target.value))); setPage(1) }} /></Field><Field label="匹配策略"><select value={matchingStrategy} onChange={(event) => setMatchingStrategy(event.target.value as 'last' | 'all')}><option value="last">last · 默认</option><option value="all">all · 全部</option></select></Field></div>
-              <Field label="过滤表达式" hint="支持 AND / OR、比较运算"><textarea value={filter} onChange={(event) => setFilter(event.target.value)} placeholder={'例如：price > 20 AND category = "book"'} rows={3} /></Field>
-              <Field label="排序规则" hint="每行一个，字段:asc 或字段:desc"><textarea value={sort} onChange={(event) => setSort(event.target.value)} placeholder="price:asc\n_createdAt:desc" rows={2} /></Field>
+              <div className="simple-filter"><div className="field-label"><span>过滤条件</span><small>可过滤字段</small></div><div className="filter-builder"><input list="filter-fields" value={filterField} onChange={(event) => setFilterField(event.target.value)} placeholder="字段" /><datalist id="filter-fields">{capabilities.filterableAttributes.map((field) => <option key={field} value={field} />)}</datalist><select value={filterOperator} onChange={(event) => setFilterOperator(event.target.value)}><option value="=">等于</option><option value="!=">不等于</option><option value=">">大于</option><option value=">=">大于等于</option><option value="<">小于</option><option value="<=">小于等于</option></select><input value={filterValue} onChange={(event) => setFilterValue(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && addFilterCondition()} placeholder="值" /><button type="button" onClick={addFilterCondition} disabled={!filterField.trim() || !filterValue.trim()}>添加</button></div>{filter && <div className="filter-expression"><span>{filter}</span><button type="button" title="清空过滤条件" onClick={() => setFilter('')}><X size={13} /></button></div>}</div>
+              <div className="simple-filter"><div className="field-label"><span>排序规则</span><small>可排序字段</small></div><div className="filter-builder sort-builder"><select value={sortField} onChange={(event) => setSortField(event.target.value)}><option value="">选择字段</option>{capabilities.sortableAttributes.map((field) => <option key={field} value={field}>{field}</option>)}</select><select value={sortDirection} onChange={(event) => setSortDirection(event.target.value as 'asc' | 'desc')}><option value="asc">升序</option><option value="desc">降序</option></select><button type="button" onClick={addSortRule} disabled={!sortField}>添加</button></div>{sort && <div className="filter-expression"><span>{sort.split(',').map((rule) => <span className="sort-chip" key={rule}>{rule}</span>)}</span><button type="button" title="清空排序" onClick={() => setSort('')}><X size={13} /></button></div>}</div>
               <button className="advanced-toggle" onClick={() => setShowAdvanced(!showAdvanced)}><SlidersHorizontal size={15} />高级参数 <span>{showAdvanced ? '收起' : '展开'}</span><ChevronDown className={showAdvanced ? 'rotated' : ''} size={15} /></button>
               {showAdvanced && <div className="advanced-fields"><Field label="Facet 字段"><input value={facets} onChange={(event) => setFacets(event.target.value)} placeholder="brand, categories" /></Field><Field label="Facet 过滤" hint="每行一组 OR 条件，发送为 filter"><textarea value={facetFilters} onChange={(event) => setFacetFilters(event.target.value)} placeholder={'brand:Apple, brand:Sony\ncategories:Audio'} rows={2} /></Field><Field label="返回字段"><input value={retrieve} onChange={(event) => setRetrieve(event.target.value)} placeholder="title, price, brand" /></Field><label className="checkbox-row"><input type="checkbox" checked={returnHighlight} onChange={(event) => setReturnHighlight(event.target.checked)} /><span>是否高亮返回</span></label><div className="field-grid two"><Field label="高亮字段"><input disabled={!returnHighlight} value={highlight} onChange={(event) => setHighlight(event.target.value)} placeholder="title, description" /></Field><Field label="裁剪字段"><input value={crop} onChange={(event) => setCrop(event.target.value)} placeholder="description" /></Field></div><Field label="裁剪长度"><input type="number" min={1} max={200} value={cropLength} onChange={(event) => setCropLength(Number(event.target.value))} /></Field><label className="toggle-row"><input type="checkbox" checked={showRankingScore} onChange={(event) => setShowRankingScore(event.target.checked)} /><span className="toggle-track" /><span>返回排序分数</span></label><p className="settings-note">拼写容错和去重字段由索引 settings 控制，不作为搜索请求参数发送。</p></div>}
               <button className="run-button" onClick={() => runSearch()} disabled={searching || !selectedUid}>{searching ? <LoaderCircle className="spin" size={17} /> : <Play size={17} fill="currentColor" />}运行搜索 <span>⌘ ↵</span></button>
