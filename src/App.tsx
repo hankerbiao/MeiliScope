@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
 import {
-  Activity, AlertCircle, Check, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Clipboard,
+  Activity, AlertCircle, ArrowLeft, ArrowRight, Check, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Clipboard,
   Copy, Database, Filter, Gauge, KeyRound, Layers3, Link2, LoaderCircle, LogOut, Play,
-  RefreshCw, Search, Server, SlidersHorizontal, X, Zap,
+  RefreshCw, Search, Server, ShieldCheck, SlidersHorizontal, X, Zap,
 } from 'lucide-react'
 import { createMeiliClient, MeiliApiError } from './api'
 import type { ConnectionConfig, IndexCapabilities, IndexSummary, SearchDiagnostics, SearchParams, SearchResponse } from './types'
@@ -53,6 +53,7 @@ function App() {
   const [crop, setCrop] = useState('')
   const [cropLength, setCropLength] = useState(10)
   const [matchingStrategy, setMatchingStrategy] = useState<'last' | 'all'>('last')
+  const [returnHighlight, setReturnHighlight] = useState(false)
   const [showRankingScore, setShowRankingScore] = useState(false)
   const [limit, setLimit] = useState(20)
   const [page, setPage] = useState(1)
@@ -73,10 +74,10 @@ function App() {
     return Array.from(keys).slice(0, 8)
   }, [hits])
   const searchFieldWarnings = useMemo(() => {
-    const fields = [...parseList(facets), ...parseList(sort), ...parseList(retrieve), ...parseList(highlight), ...parseList(crop)]
+    const fields = [...parseList(facets), ...parseList(sort), ...parseList(retrieve), ...(returnHighlight ? parseList(highlight) : []), ...parseList(crop)]
     const known = new Set([...capabilities.searchableAttributes, ...capabilities.filterableAttributes, ...capabilities.sortableAttributes, ...capabilities.displayedAttributes])
     return Array.from(new Set(fields.filter((field) => field && !known.has(field))))
-  }, [capabilities, facets, sort, retrieve, highlight, crop])
+  }, [capabilities, facets, sort, retrieve, highlight, crop, returnHighlight])
 
   const loadSettings = async (uid: string, api = client) => {
     if (!api || !uid) return
@@ -106,14 +107,18 @@ function App() {
 
   const buildSearchParams = (pageNumber = page): SearchParams => {
     const params: SearchParams = { q: query, offset: (pageNumber - 1) * limit, limit, matchingStrategy }
-    const listFields: Array<[keyof SearchParams, string]> = [['facets', facets], ['sort', sort], ['attributesToRetrieve', retrieve], ['attributesToHighlight', highlight], ['attributesToCrop', crop]]
+    const listFields: Array<[keyof SearchParams, string]> = [['facets', facets], ['sort', sort], ['attributesToRetrieve', retrieve], ['attributesToCrop', crop]]
     listFields.forEach(([key, value]) => { const list = parseList(value); if (list.length) (params[key] as string[]) = list })
+    if (returnHighlight) {
+      const highlightFields = parseList(highlight)
+      if (highlightFields.length) params.attributesToHighlight = highlightFields
+    }
     const facetExpression = facetFiltersToExpression(facetFilters)
     if (filter.trim() && facetExpression) params.filter = `(${filter.trim()}) AND ${facetExpression}`
     else if (filter.trim()) params.filter = filter.trim()
     else if (facetExpression) params.filter = facetExpression
     if (showRankingScore) params.showRankingScore = true
-    if (parseList(highlight).length) { params.highlightPreTag = '<mark>'; params.highlightPostTag = '</mark>' }
+    if (returnHighlight && parseList(highlight).length) { params.highlightPreTag = '<mark>'; params.highlightPostTag = '</mark>' }
     if (parseList(crop).length) params.cropLength = cropLength
     return params
   }
@@ -132,7 +137,7 @@ function App() {
     } finally { setSearching(false) }
   }
 
-  const resetSearch = () => { setQuery(''); setFilter(''); setSort(''); setFacets(''); setFacetFilters(''); setRetrieve(''); setHighlight(''); setCrop(''); setPage(1); setResponse(null); setDiagnostics(null); setSearchError('') }
+  const resetSearch = () => { setQuery(''); setFilter(''); setSort(''); setFacets(''); setFacetFilters(''); setRetrieve(''); setHighlight(''); setCrop(''); setReturnHighlight(false); setPage(1); setResponse(null); setDiagnostics(null); setSearchError('') }
   const copy = async (value: string) => { try { await navigator.clipboard.writeText(value) } catch { /* clipboard permission is optional */ } }
 
   if (!connected) return <ConnectionScreen config={config} setConfig={setConfig} connecting={connecting} error={connectionError} connect={connect} />
@@ -144,28 +149,28 @@ function App() {
         <div className="nav-status"><span className="status-dot online" />{config.host.replace(/^https?:\/\//, '')}</div>
         <button className="nav-action" onClick={disconnect}><LogOut size={15} />断开</button>
       </header>
+      <div className="browser-tabs"><div className="browser-tab active"><span className="tab-dot" />MeiliScope · {selectedUid || '搜索调试'}<X size={13} /></div><button className="new-tab" title="新建标签页">+</button></div>
+      <div className="browser-toolbar"><div className="browser-nav-buttons"><button title="后退"><ArrowLeft size={15} /></button><button title="前进"><ArrowRight size={15} /></button><button title="刷新" onClick={() => selectedUid && loadSettings(selectedUid)}><RefreshCw size={14} /></button></div><div className="address-bar"><ShieldCheck size={14} /><span>{config.host.replace(/^https?:\/\//, '')}/indexes/{selectedUid || '...'}/search</span><Copy size={13} className="address-copy" /></div><div className="toolbar-menu"><span className="toolbar-dot" /><span className="toolbar-dot" /><span className="toolbar-dot" /></div></div>
       <div className="sub-nav">
         <div className="sub-nav-title"><Activity size={17} />搜索调试</div>
         <div className="sub-nav-actions"><span className="connection-pill"><span className="status-dot online" />已连接</span><button className="icon-button" title="刷新索引" onClick={connect}><RefreshCw size={16} /></button></div>
       </div>
 
       <main className="workspace">
-        <section className="workspace-heading">
-          <div><p className="eyebrow">MEILISEARCH / INSPECTOR</p><h1>看见每一次搜索。</h1><p className="heading-copy">在真实索引上拆解查询、字段能力与响应性能。</p></div>
-          <div className="index-picker"><label htmlFor="index-select">当前索引</label><div className="select-wrap"><Database size={15} /><select id="index-select" value={selectedUid} onChange={(event) => changeIndex(event.target.value)}>{indexes.map((index) => <option key={index.uid} value={index.uid}>{index.uid}</option>)}</select><ChevronDown size={15} /></div></div>
+        <section className="search-header">
+          <div className="search-header-top"><div className="search-title"><div className="search-title-icon"><Search size={19} /></div><div><p className="eyebrow">MEILISEARCH / SEARCH</p><h1>搜索</h1></div></div><div className="index-picker"><label htmlFor="index-select">当前索引</label><div className="select-wrap"><Database size={15} /><select id="index-select" value={selectedUid} onChange={(event) => changeIndex(event.target.value)}>{indexes.map((index) => <option key={index.uid} value={index.uid}>{index.uid}</option>)}</select><ChevronDown size={15} /></div></div></div>
+          <div className="global-search-bar"><Search size={20} /><input id="query" value={query} onChange={(event) => { setQuery(event.target.value); setPage(1) }} onKeyDown={(event) => event.key === 'Enter' && runSearch()} placeholder="搜索索引中的文档" /><kbd>↵</kbd><button onClick={() => runSearch()} disabled={searching || !selectedUid}>{searching ? <LoaderCircle className="spin" size={16} /> : <Search size={16} />}搜索</button></div>
         </section>
 
         <div className="workspace-grid">
           <aside className="control-column">
             <section className="panel query-panel">
-              <div className="panel-heading"><div><span className="section-kicker"><Search size={14} />QUERY</span><h2>搜索参数</h2></div><button className="text-button" onClick={resetSearch}>重置</button></div>
-              <label className="field-label" htmlFor="query">查询词</label>
-              <div className="query-input"><Search size={17} /><input id="query" value={query} onChange={(event) => { setQuery(event.target.value); setPage(1) }} onKeyDown={(event) => event.key === 'Enter' && runSearch()} placeholder="输入要搜索的内容" /><kbd>↵</kbd></div>
+              <div className="panel-heading"><div><span className="section-kicker"><SlidersHorizontal size={14} />FILTERS</span><h2>筛选与参数</h2></div><button className="text-button" onClick={resetSearch}>重置</button></div>
               <div className="field-grid two"><Field label="每页数量"><input type="number" min={1} max={1000} value={limit} onChange={(event) => { setLimit(Math.max(1, Number(event.target.value))); setPage(1) }} /></Field><Field label="匹配策略"><select value={matchingStrategy} onChange={(event) => setMatchingStrategy(event.target.value as 'last' | 'all')}><option value="last">last · 默认</option><option value="all">all · 全部</option></select></Field></div>
               <Field label="过滤表达式" hint="支持 AND / OR、比较运算"><textarea value={filter} onChange={(event) => setFilter(event.target.value)} placeholder={'例如：price > 20 AND category = "book"'} rows={3} /></Field>
               <Field label="排序规则" hint="每行一个，字段:asc 或字段:desc"><textarea value={sort} onChange={(event) => setSort(event.target.value)} placeholder="price:asc\n_createdAt:desc" rows={2} /></Field>
               <button className="advanced-toggle" onClick={() => setShowAdvanced(!showAdvanced)}><SlidersHorizontal size={15} />高级参数 <span>{showAdvanced ? '收起' : '展开'}</span><ChevronDown className={showAdvanced ? 'rotated' : ''} size={15} /></button>
-              {showAdvanced && <div className="advanced-fields"><Field label="Facet 字段"><input value={facets} onChange={(event) => setFacets(event.target.value)} placeholder="brand, categories" /></Field><Field label="Facet 过滤" hint="每行一组 OR 条件，发送为 filter"><textarea value={facetFilters} onChange={(event) => setFacetFilters(event.target.value)} placeholder={'brand:Apple, brand:Sony\ncategories:Audio'} rows={2} /></Field><Field label="返回字段"><input value={retrieve} onChange={(event) => setRetrieve(event.target.value)} placeholder="title, price, brand" /></Field><div className="field-grid two"><Field label="高亮字段"><input value={highlight} onChange={(event) => setHighlight(event.target.value)} placeholder="title, description" /></Field><Field label="裁剪字段"><input value={crop} onChange={(event) => setCrop(event.target.value)} placeholder="description" /></Field></div><Field label="裁剪长度"><input type="number" min={1} max={200} value={cropLength} onChange={(event) => setCropLength(Number(event.target.value))} /></Field><label className="toggle-row"><input type="checkbox" checked={showRankingScore} onChange={(event) => setShowRankingScore(event.target.checked)} /><span className="toggle-track" /><span>返回排序分数</span></label><p className="settings-note">拼写容错和去重字段由索引 settings 控制，不作为搜索请求参数发送。</p></div>}
+              {showAdvanced && <div className="advanced-fields"><Field label="Facet 字段"><input value={facets} onChange={(event) => setFacets(event.target.value)} placeholder="brand, categories" /></Field><Field label="Facet 过滤" hint="每行一组 OR 条件，发送为 filter"><textarea value={facetFilters} onChange={(event) => setFacetFilters(event.target.value)} placeholder={'brand:Apple, brand:Sony\ncategories:Audio'} rows={2} /></Field><Field label="返回字段"><input value={retrieve} onChange={(event) => setRetrieve(event.target.value)} placeholder="title, price, brand" /></Field><label className="checkbox-row"><input type="checkbox" checked={returnHighlight} onChange={(event) => setReturnHighlight(event.target.checked)} /><span>是否高亮返回</span></label><div className="field-grid two"><Field label="高亮字段"><input disabled={!returnHighlight} value={highlight} onChange={(event) => setHighlight(event.target.value)} placeholder="title, description" /></Field><Field label="裁剪字段"><input value={crop} onChange={(event) => setCrop(event.target.value)} placeholder="description" /></Field></div><Field label="裁剪长度"><input type="number" min={1} max={200} value={cropLength} onChange={(event) => setCropLength(Number(event.target.value))} /></Field><label className="toggle-row"><input type="checkbox" checked={showRankingScore} onChange={(event) => setShowRankingScore(event.target.checked)} /><span className="toggle-track" /><span>返回排序分数</span></label><p className="settings-note">拼写容错和去重字段由索引 settings 控制，不作为搜索请求参数发送。</p></div>}
               <button className="run-button" onClick={() => runSearch()} disabled={searching || !selectedUid}>{searching ? <LoaderCircle className="spin" size={17} /> : <Play size={17} fill="currentColor" />}运行搜索 <span>⌘ ↵</span></button>
             </section>
 
