@@ -30,8 +30,6 @@ export type SearchParams = {
   sort?: string[]
   attributesToRetrieve?: string[]
   matchingStrategy?: 'last' | 'all'
-  typoTolerance?: boolean
-  distinct?: string
   attributesToHighlight?: string[]
   highlightPreTag?: string
   highlightPostTag?: string
